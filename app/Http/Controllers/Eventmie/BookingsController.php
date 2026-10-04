@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Validator;
 use App\Models\Attendee;
 use App\Models\Ticket;
 use App\Models\Seat;
+use App\Services\PaystackService;
 use Paystack;
 class BookingsController extends BaseBookingsController
 {
@@ -1884,60 +1885,76 @@ class BookingsController extends BaseBookingsController
 
     protected function paystack($order = [], $currency = 'USD')
     {
-        //The $amount is in Nigeria Kobo, so always add double zeros on any amount you are charging the customer. e.g 100000 for 1000
-        $order['price'] = $order['price'] * 100; 
-        
+        $publicKey = app(PaystackService::class)->getPublicKey();
+        $reference = app(PaystackService::class)->generateReference($order, (string) now()->timestamp);
+
         $paystack = [
             'order'            => $order,
             'payment_method'   => session('payment_method'),
-            'secretKey'        => config('paystack.secretKey'),
-            "reference"        => Paystack::genTranxRef(),
-            "route"            => route('payment_paystack'),
+            'publicKey'        => $publicKey,
+            'reference'        => $reference,
+            'route'            => route('payment_paystack'),
             'csrf_token'       => csrf_token(),
             'paystack'         => 1,
-            
         ];
-        
-        return response(['status' => true, 'paystack'=>$paystack ], Response::HTTP_OK);
-    } 
 
-     /**
+        return response(['status' => true, 'paystack' => $paystack], Response::HTTP_OK);
+    }
+
+    /**
      * Redirect the User to Paystack Payment Page
      * @return Url
      */
     public function redirectToGateway(Request $request)
     {
-           
-        return Paystack::getAuthorizationUrl()->redirectNow();
+        $order = session('pre_payment', []);
+        $booking = session('booking', []);
+
+        if (empty($order) || empty($booking)) {
+            return redirect()->route('eventmie.events_index');
+        }
+
+        $service = app(PaystackService::class);
+
+        try {
+            $response = $service->initializeTransaction($order, $booking, ['email' => session('payment_method')['customer_email'] ?? null]);
+            return redirect()->away($response['authorization_url']);
+        } catch (\Throwable $exception) {
+            return redirect()->route('eventmie.events_index')->withErrors(['payment' => $exception->getMessage()]);
+        }
     }
 
     /**
      * Obtain Paystack payment information
      * @return void
      */
-    public function handleGatewayCallback()
+    public function handleGatewayCallback(Request $request)
     {
-        $paystack = Paystack::getPaymentData();
+        $reference = $request->query('reference');
 
+        if (empty($reference)) {
+            return redirect()->route('eventmie.mybookings_index')->withErrors(['payment' => __('eventmie-pro::em.payment').' '.__('eventmie-pro::em.failed')]);
+        }
 
-            // if paid === true
-            // flag = transaction_id, status=1, payer_reference, message
-            // if paid === false
-            // flag = status=0, error=error_message
-        $flag = [];
-        if($paystack['status'])
-        {
-            $flag['status']             = true;
-            $flag['transaction_id']     = $paystack['data']['reference'];
-            $flag['payer_reference']    = $paystack['data']['customer']['id'];
-            $flag['message']            = $paystack['message'];
+        $service = app(PaystackService::class);
+        $result = $service->verifyTransaction($reference, session('pre_payment.price') ?? null, session('booking.0.currency') ?? null);
+
+        if (!$result['verified']) {
+            return redirect()->route('eventmie.mybookings_index')->withErrors(['payment' => $result['message']]);
         }
-        else
-        {   
-            $flag['status']             = false;
-            $flag['error']              = $paystack['message'];
-        }
-        
+
+        $flag = [
+            'status' => true,
+            'transaction_id' => $result['reference'],
+            'payer_reference' => $result['data']['customer']['id'] ?? null,
+            'message' => $result['message'],
+        ];
+
         return $this->finish_checkout($flag);
+    }
+
+    public function handlePaystackWebhook(Request $request)
+    {
+        return app(PaystackService::class)->handleWebhook($request);
     }
 }

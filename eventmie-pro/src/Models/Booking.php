@@ -29,19 +29,20 @@ class Booking extends Model
      */
     protected static function booted()
     {
-        
-        if(\Request::route()->getName() != 'voyager.bookings.bulk_bookings')
+        $route = \Request::route();
+
+        if($route && $route->getName() != 'voyager.bookings.bulk_bookings')
         {
             static::addGlobalScope(new BulkScope);
         }
-        
-        if(\Request::route()->getName() == 'voyager.bookings.bulk_bookings')
+
+        if($route && $route->getName() == 'voyager.bookings.bulk_bookings')
         {
             static::addGlobalScope('bulk_scope', function (Builder $builder) {
                 $builder->where(['is_bulk' => 1]);
             });
         }
-        
+
     }
     
     // make booking

@@ -25,7 +25,7 @@ use Classiebit\Eventmie\Middleware\Authenticate;
 
 Route::get('/', function () {
     if(!file_exists(storage_path()."/installed")) {
-        header('location:license');die;
+        return redirect('/license');
     }
 
     return view('welcome');
@@ -33,7 +33,7 @@ Route::get('/', function () {
 
 Route::get('/license', 'App\Http\Controllers\LicenseController@index');
 Route::get('/52cab7070ba5124895a63a3703f66893232', function() {
-    header('location:install');die;
+    return redirect('/install');
 });
 
 Route::bind('event', function ($value) {
@@ -41,6 +41,14 @@ Route::bind('event', function ($value) {
 });
 
 Route::get('/invoice/download/bookings/{booking}', 'App\Http\Controllers\Eventmie\DownloadsController@downloadInvoice')->name('invoice');
+
+Route::post('/paystack/webhook', '\App\Http\Controllers\Eventmie\BookingsController@handlePaystackWebhook')
+    ->name('paystack.webhook')
+    ->withoutMiddleware([
+        \App\Http\Middleware\SubOrganizer::class,
+        \App\Http\Middleware\Authenticate::class,
+        \Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class,
+    ]);
     
 /* set local timezone */
 Route::post('/set/local_timezone', function (\Illuminate\Http\Request $request) {
@@ -384,7 +392,7 @@ Route::group([
 
         
     //paystack routes start
-    Route::post('/payment/paystack', '\App\Http\Controllers\Eventmie\BookingsController@redirectToGateway')->name('payment_paystack'); 
-    Route::get('/paystack/payment/callback', '\App\Http\Controllers\Eventmie\BookingsController@handleGatewayCallback');
+    Route::post('/payment/paystack', '\App\Http\Controllers\Eventmie\BookingsController@redirectToGateway')->name('payment_paystack');
+    Route::get('/paystack/payment/callback', '\App\Http\Controllers\Eventmie\BookingsController@handleGatewayCallback')->name('paystack.callback');
     //paystack routes end
-});   
+});
